@@ -7,9 +7,10 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
       - name: Deploy
         run: |
+          cd /Users/nathanblatter/Desktop/secreth
+          git pull origin main
           docker compose down
           docker compose build --no-cache
           docker compose up -d
