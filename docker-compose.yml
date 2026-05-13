@@ -12,6 +12,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:5432/secrethitler
       JWT_SECRET: ${JWT_SECRET}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      KPI_API_KEY: ${KPI_API_KEY}
     depends_on:
       seed:
         condition: service_completed_successfully
