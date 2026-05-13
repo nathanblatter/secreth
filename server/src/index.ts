@@ -9,6 +9,7 @@ import { registerSocketHandlers } from './socket/handlers';
 import { initDb } from './db';
 import authRouter from './auth/authRouter';
 import adminRouter from './routes/adminRouter';
+import kpiRouter from './routes/kpiRouter';
 import { verifyToken } from './auth/jwt';
 
 const app = express();
@@ -23,6 +24,7 @@ app.use(express.json());
 
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/kpi', kpiRouter);
 
 // In production, serve the built client files
 if (IS_PROD) {

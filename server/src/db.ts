@@ -28,6 +28,14 @@ export async function initDb(): Promise<void> {
     `);
 
     await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ
+    `);
+
+    await pool.query(`
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS lobby_opened_at TIMESTAMPTZ
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS games (
         id            SERIAL PRIMARY KEY,
         room_code     VARCHAR(6) NOT NULL,
