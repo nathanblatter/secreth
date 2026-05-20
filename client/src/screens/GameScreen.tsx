@@ -15,6 +15,7 @@ import { GameLogToggle, GameLogPanel } from '../components/ui/GameLog';
 import { NotePadToggle, NotePadPanel } from '../components/ui/NotePad';
 import { ChatToggle, ChatPanel } from '../components/ui/ChatPanel';
 import * as emitters from '../lib/socketEmitters';
+import { DiscussionOverlay } from '../components/ui/DiscussionOverlay';
 
 // Phase components
 import RoleReveal from '../components/phases/RoleReveal';
@@ -161,16 +162,34 @@ export default function GameScreen() {
       {/* ─── Phase action area ─── */}
       <main className="flex-1 flex items-start sm:items-center justify-center px-2 sm:px-4 pb-1 sm:pb-4">
         <AnimatePresence mode="wait">
-          <motion.div
-            key={`${gameState.phase}-${gameState.currentPresidentId}-${gameState.nominatedChancellorId}`}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-            className="w-full max-w-2xl"
-          >
-            <PhaseRenderer phase={gameState.phase} />
-          </motion.div>
+          {gameState.awaitingDiscussion ? (
+            <motion.div
+              key="discussion"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-2xl"
+            >
+              <DiscussionOverlay
+                players={gameState.players}
+                readyVotes={gameState.readyVotes}
+                myPlayerId={myPlayerId}
+                onReady={() => {}}
+              />
+            </motion.div>
+          ) : (
+            <motion.div
+              key={`${gameState.phase}-${gameState.currentPresidentId}-${gameState.nominatedChancellorId}`}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-2xl"
+            >
+              <PhaseRenderer phase={gameState.phase} />
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
 
