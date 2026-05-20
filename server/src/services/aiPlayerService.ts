@@ -115,8 +115,13 @@ export class AIPlayerService {
         system: systemPrompt,
         messages: [{
           role: 'user',
-          content: `You are the President and must nominate a Chancellor. Eligible players: ${eligibleNames}.
-Respond with JSON: {"chancellorId": "<id>", "reasoning": "<brief reasoning>"}`,
+          content: `You are President this round. Choose a Chancellor to nominate.
+
+Eligible players: ${eligibleNames}
+
+Consider: Who do you trust based on their voting history and past governments? Who has passed fascist policies before? Who would your team benefit from electing?
+
+Respond with JSON only: {"chancellorId": "<id>", "reasoning": "<1-2 sentence strategic reason>"}`,
         }],
       });
 
@@ -164,8 +169,13 @@ Respond with JSON: {"chancellorId": "<id>", "reasoning": "<brief reasoning>"}`,
         system: systemPrompt,
         messages: [{
           role: 'user',
-          content: `Vote on the proposed government: President ${presName} + Chancellor ${chanName}.
-Respond with JSON: {"vote": true or false, "reasoning": "<brief>"}`,
+          content: `Vote on this proposed government: President ${presName} + Chancellor ${chanName}.
+
+Think about: Have either of them been in governments that enacted fascist policies? How did they vote in past elections? Is electing them now dangerous given the current fascist policy count (${this.room.getState().policyTrack.fascist}/6)?
+
+Ja = vote to elect them. Nein = reject.
+
+Respond with JSON only: {"vote": true, "reasoning": "<1 sentence>"}`,
         }],
       });
 
@@ -211,8 +221,13 @@ Respond with JSON: {"vote": true or false, "reasoning": "<brief>"}`,
         system: systemPrompt,
         messages: [{
           role: 'user',
-          content: `You are the President. Choose one policy to DISCARD. Your 3 cards: [${choiceStr}].
-Respond with JSON: {"discardIndex": 0, 1, or 2, "reasoning": "<brief>"}`,
+          content: `You are President. You drew 3 policy cards and must secretly DISCARD one, then pass 2 to the Chancellor.
+
+Your cards: [${choiceStr}]
+
+Choose which index to discard. Remember: the Chancellor will see the 2 remaining cards and choose one to enact. You cannot tell the Chancellor what you discarded.
+
+Respond with JSON only: {"discardIndex": 0, "reasoning": "<1 sentence>"}`,
         }],
       });
 
@@ -288,8 +303,13 @@ Respond with JSON: {"discardIndex": 0, 1, or 2, "reasoning": "<brief>"}`,
         system: systemPrompt,
         messages: [{
           role: 'user',
-          content: `You are the Chancellor. Choose one policy to ENACT. Your 2 cards: [${choiceStr}].
-Respond with JSON: {"enactIndex": 0 or 1, "reasoning": "<brief>"}`,
+          content: `You are Chancellor. The President passed you 2 cards. You must ENACT one and the other is discarded.
+
+Your cards: [${choiceStr}]
+
+The enacted policy is public. Consider: what benefits your party? What can you justify claiming to others?
+
+Respond with JSON only: {"enactIndex": 0, "reasoning": "<1 sentence>"}`,
         }],
       });
 
@@ -343,8 +363,17 @@ Respond with JSON: {"enactIndex": 0 or 1, "reasoning": "<brief>"}`,
         system: systemPrompt,
         messages: [{
           role: 'user',
-          content: `The Chancellor has requested a veto. Do you approve? Consider your role and strategy.
-Respond with JSON: {"approve": true or false, "reasoning": "<brief>"}`,
+          content: `The Chancellor has requested a VETO — they want to discard all policies and advance the election tracker instead.
+
+Current election tracker: ${state.electionTracker}/3${state.electionTracker === 2 ? ' ⚠ Approving veto will trigger a CHAOS POLICY from the deck!' : ''}.
+Policies so far: ${state.policyTrack.liberal} Liberal / ${state.policyTrack.fascist} Fascist.
+
+Consider:
+- If LIBERAL and you trust the Chancellor: approve if you believe their cards were truly bad. But at tracker 2, a chaos policy is dangerous.
+- If FASCIST: approve if it helps your team (avoids liberal enactment). Reject if you want to force a fascist policy through.
+- A rejected veto forces the Chancellor to enact one of their cards.
+
+Respond with JSON only: {"approve": true, "reasoning": "<1 sentence>"}`,
         }],
       });
 
@@ -423,7 +452,13 @@ Respond with JSON: {"approve": true or false, "reasoning": "<brief>"}`,
             model: 'claude-sonnet-4-6',
             max_tokens: 128,
             system: systemPrompt,
-            messages: [{ role: 'user', content: `Investigate one player's loyalty. Options: ${names}. Respond with JSON: {"targetId": "<id>", "reasoning": "<brief>"}` }],
+            messages: [{ role: 'user', content: `EXECUTIVE POWER: Investigate a player's party loyalty (you learn if they're Liberal or Fascist).
+
+Options: ${names}
+
+Who is most suspicious based on their voting history and past policy enactments? Who would it be most valuable to confirm?
+
+Respond with JSON only: {"targetId": "<id>", "reasoning": "<1 sentence>"}` }],
           });
           const c = response.content[0];
           if (c.type === 'text') {
@@ -457,7 +492,16 @@ Respond with JSON: {"approve": true or false, "reasoning": "<brief>"}`,
             model: 'claude-sonnet-4-6',
             max_tokens: 128,
             system: systemPrompt,
-            messages: [{ role: 'user', content: `Choose next President for a special election. Options: ${names}. Respond with JSON: {"targetId": "<id>", "reasoning": "<brief>"}` }],
+            messages: [{ role: 'user', content: `EXECUTIVE POWER: Special Election — you choose who becomes the next President, skipping the normal rotation.
+
+Options: ${names}
+
+This is a powerful disruption tool. Consider:
+- If you are FASCIST: choose a fellow fascist or someone you can trust to nominate a fascist chancellor. Avoid picking suspicious players who might expose your team.
+- If you are LIBERAL: choose the most trusted liberal player who you believe can nominate a good chancellor. Avoid players who have been in governments that enacted fascist policies.
+- Think about who is next in the normal rotation — is skipping them good or bad for your side?
+
+Respond with JSON only: {"targetId": "<id>", "reasoning": "<1 sentence strategic reason>"}` }],
           });
           const c = response.content[0];
           if (c.type === 'text') {
@@ -488,7 +532,18 @@ Respond with JSON: {"approve": true or false, "reasoning": "<brief>"}`,
             model: 'claude-sonnet-4-6',
             max_tokens: 128,
             system: systemPrompt,
-            messages: [{ role: 'user', content: `Execute one player. Options: ${names}. Respond with JSON: {"targetId": "<id>", "reasoning": "<brief>"}` }],
+            messages: [{ role: 'user', content: `EXECUTIVE POWER: Execution — you permanently kill one player. This is a critical decision.
+
+Options: ${names}
+
+Current fascist policies: ${state.policyTrack.fascist}/6. Liberals win immediately if Hitler is executed.
+
+Consider:
+- If you are LIBERAL: who is most likely Hitler or a key fascist? Target the most dangerous fascist — someone who has enacted fascist policies, consistently voted to elect suspicious governments, or been investigated as fascist. If you are almost certain someone is Hitler (${state.policyTrack.fascist >= 3 ? 'game is late — Hitler could win as Chancellor!' : 'identify the most suspicious player'}), execute them.
+- If you are FASCIST: eliminate a key liberal who is building evidence, investigating your team, or likely to figure out who Hitler is. Do NOT execute fellow fascists. Avoid executing players who would be too obviously liberal (don't make yourself look suspicious).
+- Look at voting history: fascists vote Ja together. Look at who enacted fascist policies.
+
+Respond with JSON only: {"targetId": "<id>", "reasoning": "<1 sentence strategic reason>"}` }],
           });
           const c = response.content[0];
           if (c.type === 'text') {
@@ -560,14 +615,20 @@ Respond with JSON: {"approve": true or false, "reasoning": "<brief>"}`,
 
     let prompt = '';
     switch (trigger.type) {
-      case 'election-result':
-        prompt = `The election ${trigger.passed ? 'passed' : 'failed'}. President: ${trigger.presidentName}, Chancellor: ${trigger.chancellorName}. Comment briefly in character (1-2 sentences). Plain text only.`;
+      case 'election-result': {
+        const passed = trigger.passed;
+        prompt = `The election just ${passed ? 'PASSED' : 'FAILED'}. Government: ${trigger.presidentName} (President) + ${trigger.chancellorName} (Chancellor).
+React in character. ${passed ? 'What do you think about this government being elected?' : 'What do you think about this government being rejected?'} You may express suspicion, relief, or commentary. 1-2 sentences. Plain text only.`;
         break;
-      case 'policy-enacted':
-        prompt = `A ${trigger.policyType} policy was just enacted. React briefly in character (1-2 sentences). Plain text only.`;
+      }
+      case 'policy-enacted': {
+        const track = state.policyTrack;
+        prompt = `A ${trigger.policyType.toUpperCase()} policy was just enacted. Policy track: ${track.liberal} liberal / ${track.fascist} fascist.
+React in character — ${trigger.policyType === 'fascist' ? 'this is alarming if you are liberal, satisfying if fascist' : 'this is good if liberal, bad if fascist'}. Express your reaction without revealing your role. 1-2 sentences. Plain text only.`;
         break;
+      }
       case 'execution':
-        prompt = `${trigger.targetName} has just been executed. React briefly in character (1-2 sentences). Plain text only.`;
+        prompt = `${trigger.targetName} has just been executed by the President. React in character — express shock, satisfaction, or suspicion as fits your personality and what you know. 1-2 sentences. Plain text only.`;
         break;
       default:
         return;
@@ -605,11 +666,13 @@ Respond with JSON: {"approve": true or false, "reasoning": "<brief>"}`,
       const systemPrompt = this.buildSystemPrompt(aiId);
       const response = await this.client.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 80,
+        max_tokens: 100,
         system: systemPrompt,
         messages: [{
           role: 'user',
-          content: `${humanName} said: "${text}". They mentioned your name. Reply briefly in character (1-2 sentences). Plain text only.`,
+          content: `${humanName} just said: "${text}"
+
+They mentioned your name. Reply directly to what they said, in character. Be specific — address their actual point, accusation, or question. 1-2 sentences. Plain text only.`,
         }],
       });
       const content = response.content[0];
@@ -687,39 +750,100 @@ Respond with JSON: {"approve": true or false, "reasoning": "<brief>"}`,
     const state = this.room.getState();
     const privateState = this.room.getPrivateState(aiId);
 
-    const presidentName = state.players.find(p => p.id === state.currentPresidentId)?.name ?? 'unknown';
-    const chancellorName = state.nominatedChancellorId
-      ? (state.players.find(p => p.id === state.nominatedChancellorId)?.name ?? 'none')
-      : 'none';
+    const playerName = (id: string | null) => id ? (state.players.find(p => p.id === id)?.name ?? '?') : 'none';
+
+    // ── Role & team ──
+    let roleSection = `YOUR ROLE: ${privateState.role.toUpperCase()} (${privateState.partyMembership} party).`;
+    if (privateState.partyMembership === 'fascist') {
+      const fellowNames = privateState.knownFascists.map(id => playerName(id)).join(', ');
+      if (fellowNames) roleSection += `\nFellow fascists (only you know this): ${fellowNames}.`;
+      if (privateState.knownHitlerId) roleSection += `\nHitler (only you know this): ${playerName(privateState.knownHitlerId)}.`;
+    }
+
+    // ── Strategy guide ──
+    const strategy = privateState.partyMembership === 'liberal'
+      ? `LIBERAL STRATEGY: Your goal is 5 liberal policies OR executing Hitler.
+- Vote Nein on governments involving players who have enacted fascist policies before.
+- A fascist president/chancellor always chooses the fascist card when given a choice. If someone claims "I had no liberal cards," consider whether that's plausible.
+- Watch for voting patterns: fascists often vote Ja on governments involving other fascists.
+- Use investigations to gather evidence. Be open about results to build coalition.
+- If election tracker reaches 2, consider whether to pass a bad government vs. risk a chaos policy.`
+      : `FASCIST STRATEGY: Your goal is 6 fascist policies OR getting Hitler elected Chancellor after 3+ fascist policies.
+- Appear liberal. Claim you "had no choice" when enacting fascist policies ("only fascist cards in hand").
+- Coordinate subtly with your team (${privateState.knownFascists.map(id => playerName(id)).join(', ')}) — vote to elect each other but don't make it obvious.
+- If Hitler is Chancellor-eligible (after 3 fascist policies), nominate them.
+- When safe to do so, nominate fascist players as chancellor.
+- Keep the election tracker high by occasionally voting Nein on good governments.`;
+
+    // ── Board state ──
     const alivePlayers = state.players.filter(p => p.status === 'alive').map(p => p.name).join(', ');
+    const deadPlayers = state.players.filter(p => p.status === 'dead').map(p => p.name);
     const lastGov = state.lastElectedGovernment
-      ? `${state.players.find(p => p.id === state.lastElectedGovernment!.presidentId)?.name ?? '?'} and ${state.players.find(p => p.id === state.lastElectedGovernment!.chancellorId)?.name ?? '?'}`
+      ? `${playerName(state.lastElectedGovernment.presidentId)} (P) + ${playerName(state.lastElectedGovernment.chancellorId)} (C) — term-limited`
       : 'none';
+    const round = state.gameLog.filter(e =>
+      e.type === 'election-passed' || e.type === 'election-failed' || e.type === 'chaos-policy'
+    ).length + 1;
 
-    let roleInfo = `Your secret role: ${privateState.role} (${privateState.partyMembership} party).`;
-    if (privateState.knownFascists.length > 0) {
-      const fascistNames = privateState.knownFascists
-        .map(id => state.players.find(p => p.id === id)?.name)
-        .filter(Boolean)
-        .join(', ');
-      roleInfo += ` Fellow fascists: ${fascistNames}.`;
+    // ── Game history (full log with vote breakdowns) ──
+    const historyLines: string[] = [];
+    for (const entry of state.gameLog) {
+      const voteStr = entry.playerVotes
+        ? ' [' + Object.entries(entry.playerVotes).map(([n, v]) => `${n}:${v ? 'Ja' : 'Nein'}`).join(' ') + ']'
+        : '';
+      switch (entry.type) {
+        case 'election-passed':
+          historyLines.push(`R${entry.round} ELECTED: ${entry.presidentName}+${entry.chancellorName} (${entry.votesYes}–${entry.votesNo})${voteStr}`);
+          break;
+        case 'election-failed':
+          historyLines.push(`R${entry.round} REJECTED: ${entry.presidentName}+${entry.chancellorName} (${entry.votesYes}–${entry.votesNo})${voteStr}`);
+          break;
+        case 'policy-enacted':
+          historyLines.push(`R${entry.round} POLICY: ${entry.policy!.toUpperCase()} enacted by ${entry.presidentName}+${entry.chancellorName}`);
+          break;
+        case 'chaos-policy':
+          historyLines.push(`R${entry.round} CHAOS: ${entry.policy!.toUpperCase()} policy auto-enacted from deck (3 failed elections)`);
+          break;
+        case 'execution':
+          historyLines.push(`R${entry.round} EXECUTED: ${entry.targetName} by President ${entry.presidentName}`);
+          break;
+        case 'investigation':
+          historyLines.push(`R${entry.round} INVESTIGATED: ${entry.presidentName} investigated ${entry.targetName}`);
+          break;
+        case 'special-election':
+          historyLines.push(`R${entry.round} SPECIAL ELECTION: ${entry.targetName} chosen by ${entry.presidentName}`);
+          break;
+        case 'veto-approved':
+          historyLines.push(`R${entry.round} VETO: ${entry.presidentName}+${entry.chancellorName} discarded all policies`);
+          break;
+      }
     }
-    if (privateState.knownHitlerId) {
-      const hitlerName = state.players.find(p => p.id === privateState.knownHitlerId)?.name;
-      roleInfo += ` Hitler is ${hitlerName}.`;
-    }
 
-    const round = state.gameLog.filter(e => e.type === 'election-passed' || e.type === 'election-failed' || e.type === 'chaos-policy').length + 1;
+    // ── Your private investigation results ──
+    const invLines = (privateState.investigationHistory ?? []).map(
+      i => `You investigated ${i.targetName} (R${i.round}): they are ${i.party.toUpperCase()}`
+    );
 
-    return `You are ${personality.name}, a player in a live game of Secret Hitler.
-${roleInfo}
+    // ── Recent chat (last 12 messages for context) ──
+    const recentChat = state.chatLog.slice(-12).map(m => `${m.playerName}: ${m.text}`).join('\n');
+
+    return `You are ${personality.name} in a live game of Secret Hitler.
 Personality: ${personality.traits}. Speech style: ${personality.chatStyle}.
-Current game state:
-- Round ${round}
-- Liberal policies: ${state.policyTrack.liberal}/5, Fascist policies: ${state.policyTrack.fascist}/6
-- Alive players: ${alivePlayers}
-- Current President: ${presidentName}, Chancellor: ${chancellorName}
-- Election tracker: ${state.electionTracker}/3
-- Last elected government: ${lastGov}`;
+
+${roleSection}
+
+${strategy}
+
+CURRENT BOARD (Round ${round}):
+- Policies enacted: ${state.policyTrack.liberal} Liberal / ${state.policyTrack.fascist} Fascist (need 5L or 6F to win)
+- Alive: ${alivePlayers}${deadPlayers.length > 0 ? `  |  Dead: ${deadPlayers.join(', ')}` : ''}
+- President: ${playerName(state.currentPresidentId)}  |  Chancellor: ${playerName(state.nominatedChancellorId) || 'not yet nominated'}
+- Election tracker: ${state.electionTracker}/3${state.electionTracker === 2 ? ' ⚠ ONE MORE FAILURE = CHAOS POLICY' : ''}
+- Last elected government (term-limited): ${lastGov}
+
+GAME HISTORY:
+${historyLines.length > 0 ? historyLines.join('\n') : 'No rounds completed yet.'}
+${invLines.length > 0 ? '\nYOUR INVESTIGATION RESULTS (private):\n' + invLines.join('\n') : ''}
+${recentChat ? '\nRECENT CHAT:\n' + recentChat : ''}`;
   }
 }

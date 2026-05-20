@@ -183,6 +183,7 @@ export default function GameScreen() {
           myPlayerId={myPlayerId}
           onSendMessage={handleSendMessage}
           disabled={gameState.phase === 'game-over'}
+          players={gameState.players}
         />
         <GameLogPanel
           entries={gameState.gameLog}
