@@ -12,8 +12,7 @@ export function unlockAudio() {
   // Create the AudioContext inside the user-gesture call stack —
   // this is what satisfies Safari's autoplay policy.
   audioCtx = new AudioContext();
-  // Drain anything that arrived before the user clicked.
-  queue.push(...pendingQueue);
+  // Discard audio that built up before unlock (would play as an overwhelming flood).
   pendingQueue.length = 0;
   playNext();
 }
