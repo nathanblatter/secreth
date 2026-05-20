@@ -340,15 +340,17 @@ export default function CentralBoardScreen() {
         `,
       }}
     >
-      {/* ── Audio unlock prompt ── */}
+      {/* ── Audio unlock overlay ── */}
       {!audioUnlocked && (
-        <div className="absolute top-3 right-3 z-50">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70">
           <button
             type="button"
             onClick={() => { unlockAudio(); setAudioUnlocked(true); }}
-            className="bg-stone-900/90 border border-amber-800/40 rounded px-3 py-1.5 text-xs font-sans text-amber-500 hover:text-amber-400 hover:border-amber-600 transition-colors"
+            className="flex flex-col items-center gap-3 bg-stone-900 border border-amber-700/60 rounded-xl px-12 py-8 text-center shadow-2xl hover:border-amber-500 transition-colors"
           >
-            🔊 Enable narration
+            <span className="text-5xl">🔊</span>
+            <span className="text-xl font-display font-bold text-amber-400 tracking-wide">Enable Narration</span>
+            <span className="text-sm font-sans text-stone-400">Tap to enable voice narration for this board</span>
           </button>
         </div>
       )}

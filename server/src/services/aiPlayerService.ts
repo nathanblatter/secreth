@@ -9,6 +9,16 @@ import { callTTSWithVoice } from '../ttsService';
 
 type AppServer = Server<ClientToServerEvents, ServerToClientEvents, {}, SocketData>;
 
+/** Extract a JSON object from Claude's response, tolerating prose before/after or markdown fences. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractJSON(text: string): any {
+  const stripped = text.replace(/```(?:json)?\n?/g, '').replace(/\n?```/g, '');
+  const start = stripped.indexOf('{');
+  const end = stripped.lastIndexOf('}');
+  if (start === -1 || end === -1 || end < start) throw new Error('No JSON object in response');
+  return JSON.parse(stripped.slice(start, end + 1));
+}
+
 export class AIPlayerService {
   private client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   private personalitiesMap: Map<string, AIPersonality>;
@@ -127,7 +137,7 @@ Respond with JSON only: {"chancellorId": "<id>", "reasoning": "<1-2 sentence str
 
       const content = response.content[0];
       if (content.type === 'text') {
-        const parsed = JSON.parse(content.text.replace(/```json\n?|\n?```/g, ''));
+        const parsed = extractJSON(content.text);
         const targetId = parsed.chancellorId;
         if (eligiblePlayers.find(p => p.id === targetId)) {
           this.room.nominateChancellor(presidentId, targetId);
@@ -181,7 +191,7 @@ Respond with JSON only: {"vote": true, "reasoning": "<1 sentence>"}`,
 
       const content = response.content[0];
       if (content.type === 'text') {
-        const parsed = JSON.parse(content.text.replace(/```json\n?|\n?```/g, ''));
+        const parsed = extractJSON(content.text);
         vote = !!parsed.vote;
       }
     } catch {
@@ -233,7 +243,7 @@ Respond with JSON only: {"discardIndex": 0, "reasoning": "<1 sentence>"}`,
 
       const content = response.content[0];
       if (content.type === 'text') {
-        const parsed = JSON.parse(content.text.replace(/```json\n?|\n?```/g, ''));
+        const parsed = extractJSON(content.text);
         const idx = Number(parsed.discardIndex);
         if (idx >= 0 && idx < choices.length) discardIndex = idx;
       }
@@ -315,7 +325,7 @@ Respond with JSON only: {"enactIndex": 0, "reasoning": "<1 sentence>"}`,
 
       const content = response.content[0];
       if (content.type === 'text') {
-        const parsed = JSON.parse(content.text.replace(/```json\n?|\n?```/g, ''));
+        const parsed = extractJSON(content.text);
         const idx = Number(parsed.enactIndex);
         if (idx >= 0 && idx < choices.length) enactIndex = idx;
       }
@@ -379,7 +389,7 @@ Respond with JSON only: {"approve": true, "reasoning": "<1 sentence>"}`,
 
       const content = response.content[0];
       if (content.type === 'text') {
-        const parsed = JSON.parse(content.text.replace(/```json\n?|\n?```/g, ''));
+        const parsed = extractJSON(content.text);
         approve = !!parsed.approve;
       }
     } catch {
@@ -462,7 +472,7 @@ Respond with JSON only: {"targetId": "<id>", "reasoning": "<1 sentence>"}` }],
           });
           const c = response.content[0];
           if (c.type === 'text') {
-            const p = JSON.parse(c.text.replace(/```json\n?|\n?```/g, ''));
+            const p = extractJSON(c.text);
             if (eligible.find(e => e.id === p.targetId)) targetId = p.targetId;
           }
         } catch { /* use random */ }
@@ -505,7 +515,7 @@ Respond with JSON only: {"targetId": "<id>", "reasoning": "<1 sentence strategic
           });
           const c = response.content[0];
           if (c.type === 'text') {
-            const p = JSON.parse(c.text.replace(/```json\n?|\n?```/g, ''));
+            const p = extractJSON(c.text);
             if (alivePlayers.find(e => e.id === p.targetId)) targetId = p.targetId;
           }
         } catch { /* use random */ }
@@ -547,7 +557,7 @@ Respond with JSON only: {"targetId": "<id>", "reasoning": "<1 sentence strategic
           });
           const c = response.content[0];
           if (c.type === 'text') {
-            const p = JSON.parse(c.text.replace(/```json\n?|\n?```/g, ''));
+            const p = extractJSON(c.text);
             if (targets.find(e => e.id === p.targetId)) targetId = p.targetId;
           }
         } catch { /* use random */ }
