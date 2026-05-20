@@ -522,6 +522,7 @@ export class GameRoom {
 
   advanceAfterVote(): void {
     if (this.state.result) return; // game over
+    if (this.state.phase === 'executive-action') return; // chaos policy granted a power — wait for exec action
     if (this.state.voteResult === 'passed') {
       this.beginLegislativeSession();
     } else {
@@ -612,8 +613,12 @@ export class GameRoom {
       this.state = { ...this.state, electionTracker: newTracker };
       if (newTracker >= ELECTION_TRACKER_LIMIT) {
         const policy = this.drawPolicy();
-        this.enactPolicy(policy.type, true);
+        const chaosPower = this.enactPolicy(policy.type, true);
         this.state = { ...this.state, electionTracker: 0 };
+        if (chaosPower) {
+          // Executive action phase set by enactPolicy — don't advance here
+          return { vetoed: true };
+        }
       }
       this.advancePresident();
       this.beginElection();
@@ -890,7 +895,7 @@ export class GameRoom {
     }
 
     let power: ExecutivePower | null = null;
-    if (type === 'fascist' && !isChaos) {
+    if (type === 'fascist') {
       const raw = getPowerForFascistPolicy(this.players.size, track.fascist);
       power = raw ?? null;
     }
@@ -915,15 +920,17 @@ export class GameRoom {
       return null;
     }
 
-    if (!power) {
-      this.advancePresident();
-      this.beginElection();
-    } else {
+    if (power) {
       this.state = { ...this.state, phase: 'executive-action' };
       // Notify AI president to perform executive action
       if (this.state.currentPresidentId && this.aiPlayerIds.has(this.state.currentPresidentId)) {
         this.onAIEvent?.({ type: 'executive-action', presidentId: this.state.currentPresidentId, power });
       }
+    } else if (!isChaos) {
+      // Non-chaos no-power: advance immediately.
+      // Chaos no-power: caller (advanceAfterVote / respondToVeto) handles the advance.
+      this.advancePresident();
+      this.beginElection();
     }
 
     return power;

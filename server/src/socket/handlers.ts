@@ -72,6 +72,12 @@ async function resolveVoteAndAdvance(io: AppServer, room: GameRoom): Promise<voi
     io.to(room.roomCode).emit('game:over', state.result, room.getAllRoles());
     emitNarrationForGameOver(io, room, state.result);
     recordGameOverInDb(room, state.result);
+    return;
+  }
+
+  // If chaos policy granted an executive power, notify clients immediately
+  if (chaosPolicy && state.phase === 'executive-action') {
+    io.to(room.roomCode).emit('game:phase-change', 'executive-action');
   }
 
   setTimeout(() => {
