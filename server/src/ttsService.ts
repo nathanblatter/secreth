@@ -64,7 +64,7 @@ export async function narrateGameOver(result: GameResult): Promise<string | null
   return callTTS(text);
 }
 
-async function callTTS(text: string): Promise<string | null> {
+export async function callTTSWithVoice(text: string, voice: string = 'onyx'): Promise<string | null> {
   if (!OPENAI_API_KEY) {
     console.warn('[TTS] OPENAI_API_KEY not set — skipping narration');
     return null;
@@ -79,7 +79,7 @@ async function callTTS(text: string): Promise<string | null> {
       body: JSON.stringify({
         model: 'tts-1',
         input: text,
-        voice: 'onyx',
+        voice,
         response_format: 'mp3',
       }),
     });
@@ -95,4 +95,8 @@ async function callTTS(text: string): Promise<string | null> {
     console.warn('[TTS] Failed to generate narration:', err);
     return null;
   }
+}
+
+async function callTTS(text: string): Promise<string | null> {
+  return callTTSWithVoice(text, 'onyx');
 }

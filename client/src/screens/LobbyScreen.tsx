@@ -19,9 +19,21 @@ export default function LobbyScreen() {
   if (!gameState) return null;
 
   const isHost = amHost();
-  const playerCount = gameState.players.length;
-  const canStart = playerCount >= MIN_PLAYERS && playerCount <= MAX_PLAYERS;
+  const humanCount = gameState.players.length;
+  const aiCount = gameState.roomSettings?.aiPlayerCount ?? 0;
+  const totalPlayers = humanCount + aiCount;
+  const canStart = totalPlayers >= MIN_PLAYERS && totalPlayers <= MAX_PLAYERS;
   const { roomSettings } = gameState;
+
+  const handleAICountChange = async (delta: number) => {
+    const newCount = Math.max(0, Math.min(9, aiCount + delta));
+    // Ensure total stays within 5-10
+    const newTotal = humanCount + newCount;
+    if (newCount === aiCount) return;
+    if (newTotal > MAX_PLAYERS) return;
+    const error = await emitters.updateRoomSettings({ aiPlayerCount: newCount });
+    if (error) addNotification(error, 'error');
+  };
 
   const joinUrl = `${window.location.origin}/join/${gameState.roomCode}`;
   const boardUrl = `${window.location.origin}/board/${gameState.roomCode}`;
@@ -126,7 +138,7 @@ export default function LobbyScreen() {
                 canStart ? 'text-green-500' : 'text-stone-600'
               }`}
             >
-              {playerCount}/{MAX_PLAYERS}
+              {totalPlayers}/{MAX_PLAYERS}
             </span>
           </div>
 
@@ -165,10 +177,15 @@ export default function LobbyScreen() {
             ))}
           </div>
 
-          {playerCount < MIN_PLAYERS && (
+          {totalPlayers < MIN_PLAYERS && (
             <p className="text-xs font-sans text-stone-600 text-center mt-4">
               Need at least {MIN_PLAYERS} players to start
-              ({MIN_PLAYERS - playerCount} more needed)
+              ({MIN_PLAYERS - totalPlayers} more needed)
+            </p>
+          )}
+          {aiCount > 0 && (
+            <p className="text-[10px] font-sans text-amber-700/70 text-center mt-2">
+              {totalPlayers} total ({humanCount} human + {aiCount} AI)
             </p>
           )}
         </Card>
@@ -180,6 +197,35 @@ export default function LobbyScreen() {
               Room Settings
             </h3>
             <div className="flex flex-col gap-2.5">
+              {/* AI Player Count */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-sans text-parchment-200">AI Players</span>
+                  <p className="text-[10px] text-stone-500">
+                    {humanCount + aiCount > MAX_PLAYERS ? 'Room full' : `${humanCount + aiCount} total players`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAICountChange(-1)}
+                    disabled={aiCount === 0}
+                    className="w-6 h-6 rounded bg-stone-800 text-stone-300 hover:bg-stone-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-bold flex items-center justify-center"
+                  >
+                    −
+                  </button>
+                  <span className="text-sm font-display font-bold text-parchment-100 w-4 text-center">{aiCount}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleAICountChange(1)}
+                    disabled={humanCount + aiCount >= MAX_PLAYERS}
+                    className="w-6 h-6 rounded bg-stone-800 text-stone-300 hover:bg-stone-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-bold flex items-center justify-center"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <div className="h-px bg-stone-800/60" />
               <label className="flex items-center justify-between cursor-pointer">
                 <span className="text-xs font-sans text-parchment-200">Show QR Code</span>
                 <button
@@ -301,7 +347,7 @@ export default function LobbyScreen() {
             loading={loading}
             onClick={handleStart}
           >
-            {canStart ? 'Start Game' : `Need ${MIN_PLAYERS - playerCount} More`}
+            {canStart ? 'Start Game' : `Need ${MIN_PLAYERS - totalPlayers} More`}
           </Button>
         )}
 

@@ -5,6 +5,7 @@ import type {
   PartyMembership,
   GameResult,
   RoomSettings,
+  ChatMessage,
 } from './game';
 
 // ─── Client → Server Events ───────────────────────────────────────────────────
@@ -71,6 +72,9 @@ export interface ClientToServerEvents {
   ) => void;
   'executive:investigate-acknowledge': (callback: (error: string | null) => void) => void;
   'executive:peek-acknowledge': (callback: (error: string | null) => void) => void;
+
+  // Chat
+  'chat:send': (text: string, callback: (error: string | null) => void) => void;
 }
 
 // ─── Server → Client Events ───────────────────────────────────────────────────
@@ -99,6 +103,9 @@ export interface ServerToClientEvents {
 
   // Voice narration (base64-encoded MP3, board device only)
   'game:narration': (audioBase64: string) => void;
+
+  // Chat
+  'game:chat': (message: ChatMessage) => void;
 
   // Errors
   'error': (message: string) => void;

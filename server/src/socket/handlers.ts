@@ -4,12 +4,17 @@ import { RoomManager } from '../game/RoomManager';
 import type { GameRoom } from '../game/GameRoom';
 import { narrateLogEntry, narrateGameOver } from '../ttsService';
 import { recordGameStart, recordGameEnd, countRecentGames } from '../services/gameService';
+import { generateAIPersonalities } from '../services/masterAiService';
+import { AIPlayerService } from '../services/aiPlayerService';
 
 // roomCode → database game id (for recording game lifecycle)
 const gameDbIds = new Map<string, number>();
 
 // "roomCode:playerName" → pending player-left notification timer
 const disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// roomCode → AI player service
+const aiServices = new Map<string, AIPlayerService>();
 
 type AppSocket = Socket<ClientToServerEvents, ServerToClientEvents, {}, SocketData>;
 type AppServer = Server<ClientToServerEvents, ServerToClientEvents, {}, SocketData>;
@@ -35,8 +40,9 @@ function broadcastState(io: AppServer, room: ReturnType<RoomManager['getRoom']>)
   // Send public state to everyone in the socket room
   io.to(room.roomCode).emit('game:state', state);
 
-  // Send private state to each player individually
+  // Send private state to each player individually (skip AI players — no socket)
   for (const playerId of room.getPlayerIds()) {
+    if (room.isAIPlayer(playerId)) continue;
     try {
       const privateState = room.getPrivateState(playerId);
       const hasPolicies = !!privateState.policyChoices;
@@ -46,6 +52,37 @@ function broadcastState(io: AppServer, room: ReturnType<RoomManager['getRoom']>)
       // player may not have role yet (lobby phase)
     }
   }
+}
+
+async function resolveVoteAndAdvance(io: AppServer, room: GameRoom): Promise<void> {
+  const { votes, result, chaosPolicy } = room.resolveVote();
+  log('election:resolve', 'server', { result, chaosPolicy });
+  io.to(room.roomCode).emit('game:vote-reveal', votes, result);
+
+  if (chaosPolicy) {
+    io.to(room.roomCode).emit('game:chaos-policy', chaosPolicy);
+  }
+
+  broadcastState(io, room);
+  emitNarrationForLatestEntry(io, room);
+
+  const state = room.getState();
+  if (state.result) {
+    log('game:over', 'server', { result: state.result });
+    io.to(room.roomCode).emit('game:over', state.result, room.getAllRoles());
+    emitNarrationForGameOver(io, room, state.result);
+    recordGameOverInDb(room, state.result);
+  }
+
+  setTimeout(() => {
+    if (!room.getState().result) {
+      room.advanceAfterVote();
+      const newState = room.getState();
+      log('post-vote-advance', 'server', { phase: newState.phase, president: newState.currentPresidentId });
+      io.to(room.roomCode).emit('game:phase-change', newState.phase);
+      broadcastState(io, room);
+    }
+  }, 3000);
 }
 
 async function emitNarrationForLatestEntry(io: AppServer, room: GameRoom) {
@@ -167,7 +204,34 @@ export function registerSocketHandlers(io: AppServer) {
       try {
         const room = rooms.getRoomForPlayer(socket.id);
         if (!room) throw new Error('Not in a room');
+
+        // Add AI players if configured
+        const aiCount = room.getState().roomSettings.aiPlayerCount;
+        let personalities: import('../services/masterAiService').AIPersonality[] = [];
+        if (aiCount > 0) {
+          personalities = await generateAIPersonalities(aiCount);
+          const humanNames = new Set(room.getState().players.map(p => p.name.toLowerCase()));
+          for (const personality of personalities) {
+            // Ensure name doesn't collide with human players
+            let name = personality.name;
+            if (humanNames.has(name.toLowerCase())) {
+              name = name.length <= 10 ? name + ' II' : name.slice(0, 10) + ' II';
+              personality.name = name.slice(0, 12);
+            }
+            room.addAIPlayer(personality.id, personality.name);
+          }
+        }
+
         room.startGame(socket.id);
+
+        // Set up AI service
+        if (personalities.length > 0) {
+          const aiService = new AIPlayerService(room, io, personalities, (r) => resolveVoteAndAdvance(io, r));
+          aiServices.set(room.roomCode, aiService);
+          room.setAIEventCallback((e) => aiService.handleEvent(e));
+          // Fire role-reveal intro chat (after service is set up)
+          aiService.handleEvent({ type: 'role-reveal' });
+        }
 
         const state = room.getState();
         log('lobby:start', socket.id, { phase: state.phase, playerCount: state.players.length, president: state.currentPresidentId });
@@ -202,6 +266,7 @@ export function registerSocketHandlers(io: AppServer) {
       try {
         const room = rooms.getRoomForPlayer(socket.id);
         if (!room) throw new Error('Not in a room');
+        aiServices.delete(room.roomCode);
         room.resetToLobby(socket.id);
         log('lobby:restart', socket.id, { roomCode: room.roomCode, success: true });
         // Clear any pending disconnect timers for this room
@@ -233,6 +298,7 @@ export function registerSocketHandlers(io: AppServer) {
             disconnectTimers.delete(key);
           }
         }
+        aiServices.delete(room.roomCode);
         io.to(room.roomCode).emit('room:dismissed');
         rooms.dismissRoom(room.roomCode);
         log('lobby:dismiss', socket.id, { roomCode: room.roomCode });
@@ -297,7 +363,7 @@ export function registerSocketHandlers(io: AppServer) {
       }
     });
 
-    socket.on('election:vote', (vote, callback) => {
+    socket.on('election:vote', async (vote, callback) => {
       log('election:vote', socket.id, { vote });
       try {
         const room = rooms.getRoomForPlayer(socket.id);
@@ -307,36 +373,7 @@ export function registerSocketHandlers(io: AppServer) {
         broadcastState(io, room);
 
         if (allVoted) {
-          const { votes, result, chaosPolicy } = room.resolveVote();
-          log('election:resolve', 'server', { result, chaosPolicy, votes });
-          io.to(room.roomCode).emit('game:vote-reveal', votes, result);
-
-          if (chaosPolicy) {
-            io.to(room.roomCode).emit('game:chaos-policy', chaosPolicy);
-          }
-
-          broadcastState(io, room);
-          emitNarrationForLatestEntry(io, room);
-
-          // Check game over after chaos policy
-          const state = room.getState();
-          if (state.result) {
-            log('game:over', 'server', { result: state.result });
-            io.to(room.roomCode).emit('game:over', state.result, room.getAllRoles());
-            emitNarrationForGameOver(io, room, state.result);
-            recordGameOverInDb(room, state.result);
-          }
-
-          // Advance after brief animation delay
-          setTimeout(() => {
-            if (!room.getState().result) {
-              room.advanceAfterVote();
-              const newState = room.getState();
-              log('post-vote-advance', 'server', { phase: newState.phase, president: newState.currentPresidentId });
-              io.to(room.roomCode).emit('game:phase-change', newState.phase);
-              broadcastState(io, room);
-            }
-          }, 3000);
+          await resolveVoteAndAdvance(io, room);
         }
 
         callback(null);
@@ -356,12 +393,14 @@ export function registerSocketHandlers(io: AppServer) {
         const chancellorPolicies = room.presidentDiscard(socket.id, policyIndex);
         log('legislative:president-discard', socket.id, { chancellorPolicies, success: true });
 
-        // Send chancellor their 2 cards privately
+        // Send chancellor their 2 cards privately (skip if AI — AI service reads state directly)
         const chancellorId = room.getState().nominatedChancellorId!;
-        io.to(chancellorId).emit('game:private-state', {
-          ...room.getPrivateState(chancellorId),
-          policyChoices: chancellorPolicies,
-        });
+        if (!room.isAIPlayer(chancellorId)) {
+          io.to(chancellorId).emit('game:private-state', {
+            ...room.getPrivateState(chancellorId),
+            policyChoices: chancellorPolicies,
+          });
+        }
 
         io.to(room.roomCode).emit('game:phase-change', 'legislative-chancellor');
         broadcastState(io, room);
@@ -389,7 +428,7 @@ export function registerSocketHandlers(io: AppServer) {
         } else if (power) {
           log('executive-power', 'server', { power });
           io.to(room.roomCode).emit('game:phase-change', 'executive-action');
-          if (power === 'policy-peek') {
+          if (power === 'policy-peek' && !room.isAIPlayer(socket.id)) {
             const peek = room.getPolicyPeek();
             io.to(socket.id).emit('game:private-state', {
               ...room.getPrivateState(socket.id),
@@ -548,6 +587,26 @@ export function registerSocketHandlers(io: AppServer) {
         callback(null);
       } catch (err: any) {
         logError('executive:peek-acknowledge', socket.id, err);
+        callback(err.message);
+      }
+    });
+
+    // ─── Chat ──────────────────────────────────────────────────────────────
+
+    socket.on('chat:send', (text, callback) => {
+      try {
+        const trimmed = text.trim().slice(0, 200);
+        if (!trimmed) return callback('Empty message');
+        const room = rooms.getRoomForPlayer(socket.id);
+        if (!room || room.getState().phase === 'lobby') return callback('Not in game');
+        const message = room.addChatMessage(socket.id, trimmed);
+        io.to(room.roomCode).emit('game:chat', message);
+        io.to(room.roomCode).emit('game:state', room.getState());
+        const aiService = aiServices.get(room.roomCode);
+        aiService?.checkForMentionsAndReply(socket.id, socket.data.playerName ?? 'Unknown', trimmed);
+        callback(null);
+      } catch (err: any) {
+        logError('chat:send', socket.id, err);
         callback(err.message);
       }
     });

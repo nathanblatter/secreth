@@ -104,6 +104,10 @@ export function registerSocketListeners(socket: TypedSocket, store: StoreApi, en
     }
   });
 
+  socket.on('game:chat', (message) => {
+    get().appendChatMessage(message);
+  });
+
   // Room dismissed by host
   socket.on('room:dismissed', () => {
     sessionStorage.removeItem('playerSession');
@@ -130,6 +134,7 @@ export function registerSocketListeners(socket: TypedSocket, store: StoreApi, en
     socket.off('game:investigation-result');
     socket.off('game:over');
     socket.off('game:narration');
+    socket.off('game:chat');
     socket.off('room:dismissed');
     socket.off('error');
   };

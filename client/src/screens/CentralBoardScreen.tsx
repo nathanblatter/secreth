@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../store/useGameStore';
+import type { ChatMessage } from '../../../shared/src/types/game';
 import { unlockAudio } from '../hooks/useAudioQueue';
 import { GameLogPanel } from '../components/ui/GameLog';
 import {
@@ -267,9 +268,47 @@ function PlayerChip({
   );
 }
 
+/* ── Chat Feed Overlay ── */
+function ChatFeed({ messages }: { messages: ChatMessage[] }) {
+  const last5 = messages.slice(-5);
+  if (last5.length === 0) return null;
+
+  return (
+    <div className="fixed bottom-4 left-4 w-72 z-40 pointer-events-none">
+      <AnimatePresence>
+        {last5.map((msg) => (
+          <motion.div
+            key={msg.id}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+            className="mb-1.5 rounded-lg px-3 py-2"
+            style={{
+              background: 'rgba(9,9,11,0.85)',
+              border: '1px solid rgba(63,63,70,0.3)',
+              backdropFilter: 'blur(4px)',
+            }}
+          >
+            <span
+              className="font-sans font-bold text-[10px] mr-1.5"
+              style={{ color: msg.isAI ? 'rgba(251,191,36,0.8)' : 'rgba(161,161,170,0.7)' }}
+            >
+              {msg.playerName}
+              {msg.isAI && <span style={{ color: 'rgba(180,130,20,0.6)', marginLeft: 3 }}>[AI]</span>}
+            </span>
+            <span className="font-sans text-[11px] text-stone-300">{msg.text}</span>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 /* ── Main Screen ── */
 export default function CentralBoardScreen() {
   const gameState = useGameStore((s) => s.gameState);
+  const chatLog = useGameStore((s) => s.chatLog);
   const [logOpen, setLogOpen] = useState(true);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
 
@@ -612,6 +651,9 @@ export default function CentralBoardScreen() {
         </button>
         <GameLogPanel entries={gameState.gameLog} open={logOpen} />
       </div>
+
+      {/* ── Chat Feed Overlay ── */}
+      <ChatFeed messages={chatLog} />
 
       {/* ── Vote Status Overlay ── */}
       {gameState.phase === 'election-vote' && (
