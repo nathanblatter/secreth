@@ -1,6 +1,7 @@
 import {
   GameState,
   GameLogEntry,
+  ChatMessage,
   Player,
   PlayerPrivateState,
   PolicyType,
@@ -22,12 +23,25 @@ import {
   generateId,
 } from '../../../shared/src';
 
+export type AIActionEvent =
+  | { type: 'nominate'; presidentId: string }
+  | { type: 'vote'; playerIds: string[] }
+  | { type: 'president-discard'; presidentId: string }
+  | { type: 'chancellor-enact'; chancellorId: string }
+  | { type: 'veto-response'; presidentId: string }
+  | { type: 'executive-action'; presidentId: string; power: ExecutivePower }
+  | { type: 'policy-enacted'; policyType: PolicyType }
+  | { type: 'election-result'; passed: boolean; presidentName: string; chancellorName: string }
+  | { type: 'execution'; targetName: string }
+  | { type: 'role-reveal' };
+
 interface InternalPlayer extends Player {
   secretRole: SecretRole;
   partyMembership: PartyMembership;
   hasVoted: boolean;
   vote: boolean | null;
   investigatedBy: string[];
+  isAI: boolean;
 }
 
 export class GameRoom {
@@ -55,8 +69,13 @@ export class GameRoom {
   private investigationHistory: Map<string, { targetName: string; party: PartyMembership; round: number }[]> = new Map();
 
   // Room settings and spectators
-  private roomSettings: RoomSettings = { qrCodeEnabled: true, centralBoardEnabled: false, ttsNarrationEnabled: false };
+  private roomSettings: RoomSettings = { qrCodeEnabled: true, centralBoardEnabled: false, ttsNarrationEnabled: false, aiPlayerCount: 0 };
   private spectatorIds: Set<string> = new Set();
+
+  // AI player support
+  private chatLog: ChatMessage[] = [];
+  private aiPlayerIds: Set<string> = new Set();
+  private onAIEvent?: (event: AIActionEvent) => void;
 
   constructor(public readonly roomCode: string, hostId: string, hostName: string) {
     this.validateName(hostName);
@@ -65,6 +84,7 @@ export class GameRoom {
       name: hostName,
       status: 'alive',
       isConnected: true,
+      isAI: false,
       secretRole: 'liberal', // placeholder until game starts
       partyMembership: 'liberal',
       hasVoted: false,
@@ -95,6 +115,7 @@ export class GameRoom {
       name: playerName,
       status: 'alive',
       isConnected: true,
+      isAI: false,
       secretRole: 'liberal',
       partyMembership: 'liberal',
       hasVoted: false,
@@ -103,6 +124,61 @@ export class GameRoom {
     };
     this.players.set(playerId, player);
     this.state = { ...this.state, players: this.getPublicPlayers() };
+  }
+
+  addAIPlayer(id: string, name: string): void {
+    if (this.state.phase !== 'lobby') throw new Error('Game already started');
+    if (this.players.size >= 10) throw new Error('Room is full');
+    this.validateName(name);
+
+    for (const p of this.players.values()) {
+      if (p.name.toLowerCase() === name.toLowerCase()) {
+        throw new Error('Name already taken');
+      }
+    }
+
+    const player: InternalPlayer = {
+      id,
+      name,
+      status: 'alive',
+      isConnected: true,
+      isAI: true,
+      secretRole: 'liberal',
+      partyMembership: 'liberal',
+      hasVoted: false,
+      vote: null,
+      investigatedBy: [],
+    };
+    this.players.set(id, player);
+    this.aiPlayerIds.add(id);
+    this.state = { ...this.state, players: this.getPublicPlayers() };
+  }
+
+  isAIPlayer(id: string): boolean {
+    return this.aiPlayerIds.has(id);
+  }
+
+  setAIEventCallback(cb: (event: AIActionEvent) => void): void {
+    this.onAIEvent = cb;
+  }
+
+  addChatMessage(playerId: string, text: string): ChatMessage {
+    const player = this.players.get(playerId);
+    const message: ChatMessage = {
+      id: generateId(),
+      playerId,
+      playerName: player?.name ?? 'Unknown',
+      text,
+      timestamp: Date.now(),
+      isAI: this.aiPlayerIds.has(playerId),
+    };
+    this.chatLog = [...this.chatLog, message];
+    this.state = { ...this.state, chatLog: this.chatLog };
+    return message;
+  }
+
+  getChatLog(): ChatMessage[] {
+    return this.chatLog;
   }
 
   removePlayer(playerId: string): void {
@@ -231,6 +307,14 @@ export class GameRoom {
       p.investigatedBy = [];
     }
 
+    // Remove AI players (they have no socket to reconnect)
+    for (const id of this.aiPlayerIds) {
+      this.players.delete(id);
+    }
+    this.aiPlayerIds.clear();
+    this.chatLog = [];
+    this.onAIEvent = undefined;
+
     // Remove disconnected players
     for (const [id, p] of this.players) {
       if (!p.isConnected) this.players.delete(id);
@@ -302,6 +386,14 @@ export class GameRoom {
       p.hasVoted = false;
       p.vote = null;
     }
+
+    // Notify AI service of alive AI players who need to vote
+    const aliveAIVoters = this.alivePlayers()
+      .filter(p => this.aiPlayerIds.has(p.id))
+      .map(p => p.id);
+    if (aliveAIVoters.length > 0) {
+      this.onAIEvent?.({ type: 'vote', playerIds: aliveAIVoters });
+    }
   }
 
   castVote(playerId: string, vote: boolean): { allVoted: boolean } {
@@ -345,6 +437,9 @@ export class GameRoom {
 
     const presName = this.getPlayerName(this.state.currentPresidentId);
     const chanName = this.getPlayerName(this.state.nominatedChancellorId);
+
+    // Notify AI service of election result for proactive chat
+    this.onAIEvent?.({ type: 'election-result', passed, presidentName: presName, chancellorName: chanName });
 
     // Build name-keyed vote map for the log
     const playerVotes: Record<string, boolean> = {};
@@ -453,6 +548,12 @@ export class GameRoom {
     this.presidentHand = [];
 
     this.state = { ...this.state, phase: 'legislative-chancellor' };
+
+    // Notify AI chancellor to enact a policy
+    if (this.state.nominatedChancellorId && this.aiPlayerIds.has(this.state.nominatedChancellorId)) {
+      this.onAIEvent?.({ type: 'chancellor-enact', chancellorId: this.state.nominatedChancellorId });
+    }
+
     return this.chancellorHand.map(p => p.type);
   }
 
@@ -484,6 +585,11 @@ export class GameRoom {
     this.assertIsChancellor(chancellorId);
     this.vetoRequested = true;
     this.state = { ...this.state, vetoRequested: true };
+
+    // Notify AI president to respond
+    if (this.state.currentPresidentId && this.aiPlayerIds.has(this.state.currentPresidentId)) {
+      this.onAIEvent?.({ type: 'veto-response', presidentId: this.state.currentPresidentId });
+    }
   }
 
   respondToVeto(presidentId: string, approve: boolean): { vetoed: boolean } {
@@ -597,6 +703,9 @@ export class GameRoom {
 
     this.state = { ...this.state, players: this.getPublicPlayers() };
 
+    // Notify AI service for proactive chat
+    this.onAIEvent?.({ type: 'execution', targetName: target.name });
+
     if (wasHitler) {
       this.endGame({ winner: 'liberals', condition: 'liberals-hitler-killed' });
     } else {
@@ -676,7 +785,7 @@ export class GameRoom {
   // ─── Public State ───────────────────────────────────────────────────────────
 
   getState(): GameState {
-    return { ...this.state };
+    return { ...this.state, chatLog: this.chatLog };
   }
 
   getPlayerIds(): string[] {
@@ -714,6 +823,7 @@ export class GameRoom {
       pendingExecutivePower: null,
       result: null,
       gameLog: [],
+      chatLog: [],
       roomSettings: this.roomSettings,
       spectatorCount: this.spectatorIds.size,
     };
@@ -792,6 +902,9 @@ export class GameRoom {
       pendingExecutivePower: power,
     };
 
+    // Notify AI service of policy enactment for proactive chat
+    this.onAIEvent?.({ type: 'policy-enacted', policyType: type });
+
     // Check win conditions
     if (track.liberal >= WIN_CONDITIONS.liberal.policies) {
       this.endGame({ winner: 'liberals', condition: 'liberals-policies' });
@@ -807,6 +920,10 @@ export class GameRoom {
       this.beginElection();
     } else {
       this.state = { ...this.state, phase: 'executive-action' };
+      // Notify AI president to perform executive action
+      if (this.state.currentPresidentId && this.aiPlayerIds.has(this.state.currentPresidentId)) {
+        this.onAIEvent?.({ type: 'executive-action', presidentId: this.state.currentPresidentId, power });
+      }
     }
 
     return power;
@@ -822,6 +939,11 @@ export class GameRoom {
     this.presidentHand = hand;
     this.syncPileCounts();
     this.state = { ...this.state, phase: 'legislative-president' };
+
+    // Notify AI president to discard a policy
+    if (this.state.currentPresidentId && this.aiPlayerIds.has(this.state.currentPresidentId)) {
+      this.onAIEvent?.({ type: 'president-discard', presidentId: this.state.currentPresidentId });
+    }
   }
 
   private beginElection(): void {
@@ -833,6 +955,11 @@ export class GameRoom {
       votes: null,
       voteResult: null,
     };
+
+    // Notify AI president to nominate a chancellor
+    if (this.state.currentPresidentId && this.aiPlayerIds.has(this.state.currentPresidentId)) {
+      this.onAIEvent?.({ type: 'nominate', presidentId: this.state.currentPresidentId });
+    }
   }
 
   private advancePresident(): void {
@@ -878,8 +1005,8 @@ export class GameRoom {
   }
 
   private getPublicPlayers(): Player[] {
-    return [...this.players.values()].map(({ id, name, status, isConnected }) => ({
-      id, name, status, isConnected,
+    return [...this.players.values()].map(({ id, name, status, isConnected, isAI }) => ({
+      id, name, status, isConnected, isAI,
     }));
   }
 

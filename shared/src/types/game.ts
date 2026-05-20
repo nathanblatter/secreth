@@ -17,6 +17,7 @@ export interface Player {
   name: string;
   status: PlayerStatus;
   isConnected: boolean;
+  isAI?: boolean;
 }
 
 // What a given player is allowed to see about others
@@ -74,6 +75,17 @@ export interface GameResult {
   condition: WinCondition;
 }
 
+// ─── Chat ────────────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  id: string;
+  playerId: string;
+  playerName: string;
+  text: string;
+  timestamp: number;
+  isAI: boolean;
+}
+
 // ─── Game Log ────────────────────────────────────────────────────────────────
 
 export type GameLogEntryType =
@@ -108,6 +120,7 @@ export interface RoomSettings {
   qrCodeEnabled: boolean;
   centralBoardEnabled: boolean;
   ttsNarrationEnabled: boolean;
+  aiPlayerCount: number;
 }
 
 // ─── Core Game State ──────────────────────────────────────────────────────────
@@ -149,6 +162,9 @@ export interface GameState {
 
   // Action log (public, no secret info)
   gameLog: GameLogEntry[];
+
+  // Chat log
+  chatLog: ChatMessage[];
 
   // Room settings
   roomSettings: RoomSettings;

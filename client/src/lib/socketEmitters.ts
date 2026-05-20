@@ -144,3 +144,11 @@ export function spectateRoom(roomCode: string): Promise<string | null> {
     });
   });
 }
+
+export function sendChatMessage(text: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    socket.emit('chat:send', text, (error) => {
+      resolve(error);
+    });
+  });
+}

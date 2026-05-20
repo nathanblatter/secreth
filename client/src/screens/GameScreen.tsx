@@ -13,6 +13,8 @@ import { Spinner } from '../components/ui/Spinner';
 import { RolePeek } from '../components/ui/RolePeek';
 import { GameLogToggle, GameLogPanel } from '../components/ui/GameLog';
 import { NotePadToggle, NotePadPanel } from '../components/ui/NotePad';
+import { ChatToggle, ChatPanel } from '../components/ui/ChatPanel';
+import * as emitters from '../lib/socketEmitters';
 
 // Phase components
 import RoleReveal from '../components/phases/RoleReveal';
@@ -50,10 +52,26 @@ export default function GameScreen() {
   const myPlayerId = useGameStore((s) => s.myPlayerId);
   const voteReveal = useGameStore((s) => s.voteReveal);
   const isReconnecting = useGameStore((s) => s.isReconnecting);
+  const chatLog = useGameStore((s) => s.chatLog);
+  const chatOpen = useGameStore((s) => s.chatOpen);
+  const unreadChatCount = useGameStore((s) => s.unreadChatCount);
+  const setChatOpen = useGameStore((s) => s.setChatOpen);
+  const clearUnreadChat = useGameStore((s) => s.clearUnreadChat);
   const [selectedPlayerId] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [boardExpanded, setBoardExpanded] = useState(false);
+
+  const handleToggleChat = () => {
+    const next = !chatOpen;
+    setChatOpen(next);
+    if (next) clearUnreadChat();
+    if (next) { setLogOpen(false); setNotesOpen(false); }
+  };
+
+  const handleSendMessage = async (text: string) => {
+    await emitters.sendChatMessage(text);
+  };
 
   if (!gameState || !myPlayerId) return null;
 
@@ -159,12 +177,19 @@ export default function GameScreen() {
       {/* ─── Bottom bar: players + role peek ─── */}
       <footer className="px-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-4 sm:pb-4">
         {/* Inline panels — stack above the toggle buttons row when open */}
+        <ChatPanel
+          open={chatOpen && !logOpen && !notesOpen}
+          messages={chatLog}
+          myPlayerId={myPlayerId}
+          onSendMessage={handleSendMessage}
+          disabled={gameState.phase === 'game-over'}
+        />
         <GameLogPanel
           entries={gameState.gameLog}
-          open={logOpen && !notesOpen}
+          open={logOpen && !notesOpen && !chatOpen}
           investigationHistory={privateState?.investigationHistory}
         />
-        <NotePadPanel open={notesOpen} />
+        <NotePadPanel open={notesOpen && !chatOpen} />
 
         {/* Toggle buttons row */}
         <div className="flex justify-center gap-2 mb-1">
@@ -177,14 +202,19 @@ export default function GameScreen() {
               playerNames={Object.fromEntries(gameState.players.map(p => [p.id, p.name]))}
             />
           )}
+          <ChatToggle
+            open={chatOpen}
+            onToggle={handleToggleChat}
+            unreadCount={unreadChatCount}
+          />
           <GameLogToggle
             open={logOpen}
-            onToggle={() => { setLogOpen(!logOpen); setNotesOpen(false); }}
+            onToggle={() => { setLogOpen(!logOpen); setNotesOpen(false); setChatOpen(false); }}
             hasEntries={gameState.gameLog.length > 0}
           />
           <NotePadToggle
             open={notesOpen}
-            onToggle={() => { setNotesOpen(!notesOpen); setLogOpen(false); }}
+            onToggle={() => { setNotesOpen(!notesOpen); setLogOpen(false); setChatOpen(false); }}
           />
         </div>
         <PlayerRing

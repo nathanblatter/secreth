@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { GameState, PlayerPrivateState, GameResult, PartyMembership } from '../../../shared/src/types/game';
+import type { GameState, PlayerPrivateState, GameResult, PartyMembership, ChatMessage } from '../../../shared/src/types/game';
 import type { Notification, Screen } from '../types/client';
 
 interface VoteReveal {
@@ -39,6 +39,9 @@ interface GameStore {
   authUser: AuthUser | null;
   authToken: string | null;
   isReconnecting: boolean;
+  chatLog: ChatMessage[];
+  chatOpen: boolean;
+  unreadChatCount: number;
 
   // Actions
   setGameState: (state: GameState) => void;
@@ -57,6 +60,9 @@ interface GameStore {
   logout: () => void;
   addNotification: (message: string, type: Notification['type']) => void;
   clearNotification: (id: string) => void;
+  appendChatMessage: (message: ChatMessage) => void;
+  setChatOpen: (open: boolean) => void;
+  clearUnreadChat: () => void;
   reset: () => void;
 
   // Derived getters
@@ -82,6 +88,9 @@ const initialState = {
   authUser: null as AuthUser | null,
   authToken: null as string | null,
   isReconnecting: false,
+  chatLog: [] as ChatMessage[],
+  chatOpen: false,
+  unreadChatCount: 0,
 };
 
 let notifCounter = 0;
@@ -90,7 +99,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
   ...initialState,
 
   // Actions
-  setGameState: (gameState) => set({ gameState }),
+  setGameState: (gameState) => set((state) => ({
+    gameState,
+    chatLog: gameState.chatLog ?? state.chatLog,
+  })),
   setPrivateState: (privateState) => set({ privateState }),
   setMyPlayerId: (myPlayerId) => set({ myPlayerId }),
   setScreen: (screen) => set({ screen }),
@@ -124,6 +136,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set((state) => ({
       notifications: state.notifications.filter((n) => n.id !== id),
     })),
+
+  appendChatMessage: (message) =>
+    set((state) => ({
+      chatLog: [...state.chatLog, message],
+      unreadChatCount: state.chatOpen ? state.unreadChatCount : state.unreadChatCount + 1,
+    })),
+
+  setChatOpen: (chatOpen) => set({ chatOpen }),
+
+  clearUnreadChat: () => set({ unreadChatCount: 0 }),
 
   reset: () => set(initialState),
 
