@@ -33,7 +33,8 @@ export type AIActionEvent =
   | { type: 'policy-enacted'; policyType: PolicyType }
   | { type: 'election-result'; passed: boolean; presidentName: string; chancellorName: string }
   | { type: 'execution'; targetName: string }
-  | { type: 'role-reveal' };
+  | { type: 'role-reveal' }
+  | { type: 'discussion'; presidentId: string };
 
 interface InternalPlayer extends Player {
   secretRole: SecretRole;
@@ -76,6 +77,9 @@ export class GameRoom {
   private chatLog: ChatMessage[] = [];
   private aiPlayerIds: Set<string> = new Set();
   private onAIEvent?: (event: AIActionEvent) => void;
+
+  // Discussion gate
+  private readyVoteSet: Set<string> = new Set();
 
   constructor(public readonly roomCode: string, hostId: string, hostName: string) {
     this.validateName(hostName);
@@ -312,6 +316,7 @@ export class GameRoom {
       this.players.delete(id);
     }
     this.aiPlayerIds.clear();
+    this.readyVoteSet.clear();
     this.chatLog = [];
     this.onAIEvent = undefined;
 
@@ -827,6 +832,8 @@ export class GameRoom {
       vetoRequested: false,
       pendingExecutivePower: null,
       result: null,
+      awaitingDiscussion: false,
+      readyVotes: [],
       gameLog: [],
       chatLog: [],
       roomSettings: this.roomSettings,
@@ -955,18 +962,47 @@ export class GameRoom {
 
   private beginElection(): void {
     this.roundNumber++;
+    this.readyVoteSet.clear();
     this.state = {
       ...this.state,
       phase: 'election-nominate',
       nominatedChancellorId: null,
       votes: null,
       voteResult: null,
+      awaitingDiscussion: true,
+      readyVotes: [],
     };
 
-    // Notify AI president to nominate a chancellor
-    if (this.state.currentPresidentId && this.aiPlayerIds.has(this.state.currentPresidentId)) {
-      this.onAIEvent?.({ type: 'nominate', presidentId: this.state.currentPresidentId });
+    // Fire discussion event — AI players will chat then vote ready.
+    // The 'nominate' event fires once discussion ends (in castReadyVote).
+    const presidentId = this.state.currentPresidentId;
+    if (presidentId) {
+      this.onAIEvent?.({ type: 'discussion', presidentId });
     }
+  }
+
+  castReadyVote(playerId: string): { canAdvance: boolean; readyCount: number; threshold: number } {
+    const player = this.players.get(playerId);
+    if (!player || player.status === 'dead') throw new Error('Invalid player');
+    if (!this.state.awaitingDiscussion) throw new Error('Not in discussion');
+
+    this.readyVoteSet.add(playerId);
+    const aliveCount = this.alivePlayers().length;
+    const threshold = Math.floor(aliveCount / 2) + 1;
+    const readyCount = this.readyVoteSet.size;
+    const canAdvance = readyCount >= threshold;
+
+    this.state = { ...this.state, readyVotes: [...this.readyVoteSet] };
+
+    if (canAdvance) {
+      this.state = { ...this.state, awaitingDiscussion: false };
+      // AI president can now nominate
+      if (this.state.currentPresidentId && this.aiPlayerIds.has(this.state.currentPresidentId)) {
+        this.onAIEvent?.({ type: 'nominate', presidentId: this.state.currentPresidentId });
+      }
+    }
+
+    return { canAdvance, readyCount, threshold };
   }
 
   private advancePresident(): void {

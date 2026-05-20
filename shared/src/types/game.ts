@@ -160,6 +160,10 @@ export interface GameState {
   // Game over
   result: GameResult | null;
 
+  // Discussion gate (shown at start of each election-nominate)
+  awaitingDiscussion: boolean;
+  readyVotes: string[];        // player IDs who voted ready
+
   // Action log (public, no secret info)
   gameLog: GameLogEntry[];
 

@@ -80,6 +80,10 @@ export class AIPlayerService {
         this.scheduleProactiveChat(event);
         break;
       }
+      case 'discussion': {
+        this.scheduleDiscussionChat(event.presidentId);
+        break;
+      }
     }
   }
 
@@ -98,6 +102,7 @@ export class AIPlayerService {
     if (this.isGameOver()) return;
     const state = this.room.getState();
     if (state.phase !== 'election-nominate') return;
+    if (state.awaitingDiscussion) return; // wait for discussion to end
     if (state.currentPresidentId !== presidentId) return;
 
     const eligiblePlayers = state.players.filter(p => {
@@ -627,19 +632,23 @@ Respond with JSON only: {"targetId": "<id>", "reasoning": "<1 sentence strategic
     switch (trigger.type) {
       case 'election-result': {
         const passed = trigger.passed;
+        const otherNames = state.players.filter(p => p.status === 'alive' && p.id !== aiId).map(p => `@${p.name}`).join(', ');
         prompt = `The election just ${passed ? 'PASSED' : 'FAILED'}. Government: ${trigger.presidentName} (President) + ${trigger.chancellorName} (Chancellor).
-React in character. ${passed ? 'What do you think about this government being elected?' : 'What do you think about this government being rejected?'} You may express suspicion, relief, or commentary. 1-2 sentences. Plain text only.`;
+React in character. You SHOULD @mention one of the involved players or someone suspicious by name (other alive players: ${otherNames}). E.g. "@${trigger.presidentName} I don't trust this..." or "@${trigger.chancellorName} explain yourself." 1-2 sentences. Plain text only.`;
         break;
       }
       case 'policy-enacted': {
         const track = state.policyTrack;
+        const otherNames = state.players.filter(p => p.status === 'alive' && p.id !== aiId).map(p => `@${p.name}`).join(', ');
         prompt = `A ${trigger.policyType.toUpperCase()} policy was just enacted. Policy track: ${track.liberal} liberal / ${track.fascist} fascist.
-React in character — ${trigger.policyType === 'fascist' ? 'this is alarming if you are liberal, satisfying if fascist' : 'this is good if liberal, bad if fascist'}. Express your reaction without revealing your role. 1-2 sentences. Plain text only.`;
+React in character — express your reaction and @mention one specific player to direct your comment at (available: ${otherNames}). ${trigger.policyType === 'fascist' ? 'Question why this happened.' : 'Celebrate or note the progress.'} 1-2 sentences. Plain text only.`;
         break;
       }
-      case 'execution':
-        prompt = `${trigger.targetName} has just been executed by the President. React in character — express shock, satisfaction, or suspicion as fits your personality and what you know. 1-2 sentences. Plain text only.`;
+      case 'execution': {
+        const otherNames = state.players.filter(p => p.status === 'alive' && p.id !== aiId).map(p => `@${p.name}`).join(', ');
+        prompt = `${trigger.targetName} has just been executed by the President. React in character — express shock, satisfaction, or suspicion. Consider @mentioning another player to direct your reaction at (available: ${otherNames}). 1-2 sentences. Plain text only.`;
         break;
+      }
       default:
         return;
     }
@@ -714,6 +723,91 @@ They mentioned your name. Reply directly to what they said, in character. Be spe
       const delay = 4000 + i * (3000 + Math.random() * 2000);
       setTimeout(() => this.doProactiveChat(aiId, trigger), delay);
     });
+  }
+
+  private scheduleDiscussionChat(presidentId: string): void {
+    if (this.isGameOver()) return;
+    const state = this.room.getState();
+    const aliveAIs = [...this.personalitiesMap.keys()].filter(id => {
+      const p = state.players.find(pp => pp.id === id);
+      return p?.status === 'alive';
+    });
+    if (aliveAIs.length === 0) return;
+
+    // All alive AIs participate in discussion, staggered
+    const shuffled = shuffle([...aliveAIs]);
+    const chatters = shuffled.slice(0, Math.min(shuffled.length, 3)); // up to 3 comment
+    const allReady = [...aliveAIs]; // all vote ready
+
+    // Phase 1: AIs comment (starting 3s in, staggered 4s apart)
+    chatters.forEach((aiId, i) => {
+      setTimeout(() => this.doDiscussionChat(aiId), 3000 + i * 4000);
+    });
+
+    // Phase 2: AIs vote ready after their comment (or just wait)
+    allReady.forEach((aiId, i) => {
+      const chatDelay = chatters.includes(aiId) ? chatters.indexOf(aiId) * 4000 : 0;
+      const readyDelay = chatDelay + 6000 + Math.random() * 8000; // 6-14s after their comment
+      setTimeout(() => this.doVoteReady(aiId), 3000 + readyDelay);
+    });
+  }
+
+  private async doDiscussionChat(aiId: string): Promise<void> {
+    if (this.isGameOver()) return;
+    const state = this.room.getState();
+    if (!state.awaitingDiscussion) return;
+
+    const personality = this.personalitiesMap.get(aiId);
+    if (!personality) return;
+    const player = state.players.find(p => p.id === aiId);
+    if (!player || player.status === 'dead') return;
+
+    // Build a list of other players to potentially @mention
+    const otherPlayers = state.players.filter(p => p.status === 'alive' && p.id !== aiId);
+    const otherNames = otherPlayers.map(p => `@${p.name}`).join(', ');
+    const lastLog = state.gameLog[state.gameLog.length - 1];
+    const lastEvent = lastLog
+      ? `The last game event was: ${lastLog.type} (Round ${lastLog.round})`
+      : 'The game is just starting.';
+
+    try {
+      const systemPrompt = this.buildSystemPrompt(aiId);
+      const response = await this.client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 100,
+        system: systemPrompt,
+        messages: [{
+          role: 'user',
+          content: `DISCUSSION PHASE — players are talking before the next election.
+${lastEvent}
+Other players: ${otherNames}
+
+Make a comment in character. You SHOULD @mention at least one other player by name (e.g. "@Ernst why did you vote that way?"). Be direct and strategic — accuse, defend, ask questions, or build alliances. Use @Name format. 1-2 sentences. Plain text only.`,
+        }],
+      });
+      const content = response.content[0];
+      if (content.type === 'text') {
+        await this.emitChatWithTTS(aiId, content.text.trim(), personality);
+      }
+    } catch (err) {
+      console.warn('[AI] doDiscussionChat error:', err);
+    }
+  }
+
+  private async doVoteReady(aiId: string): Promise<void> {
+    if (this.isGameOver()) return;
+    const state = this.room.getState();
+    if (!state.awaitingDiscussion) return; // discussion already ended
+    const player = state.players.find(p => p.id === aiId);
+    if (!player || player.status === 'dead') return;
+
+    try {
+      const { canAdvance } = this.room.castReadyVote(aiId);
+      this.broadcast();
+      if (canAdvance) {
+        this.io.to(this.room.roomCode).emit('game:phase-change', 'election-nominate');
+      }
+    } catch { /* already voted or discussion ended */ }
   }
 
   // ─── Broadcast ───────────────────────────────────────────────────────────────

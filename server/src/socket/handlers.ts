@@ -597,6 +597,25 @@ export function registerSocketHandlers(io: AppServer) {
       }
     });
 
+    // ─── Discussion Gate ───────────────────────────────────────────────────
+
+    socket.on('discussion:ready', (callback) => {
+      try {
+        const room = rooms.getRoomForPlayer(socket.id);
+        if (!room) return callback('Not in a room');
+        const { canAdvance, readyCount, threshold } = room.castReadyVote(socket.id);
+        log('discussion:ready', socket.id, { readyCount, threshold, canAdvance });
+        broadcastState(io, room);
+        if (canAdvance) {
+          io.to(room.roomCode).emit('game:phase-change', 'election-nominate');
+        }
+        callback(null);
+      } catch (err: any) {
+        logError('discussion:ready', socket.id, err);
+        callback(err.message);
+      }
+    });
+
     // ─── Chat ──────────────────────────────────────────────────────────────
 
     socket.on('chat:send', (text, callback) => {

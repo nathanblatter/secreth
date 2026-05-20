@@ -145,6 +145,14 @@ export function spectateRoom(roomCode: string): Promise<string | null> {
   });
 }
 
+export function castReady(): Promise<string | null> {
+  return new Promise((resolve) => {
+    socket.emit('discussion:ready', (error) => {
+      resolve(error);
+    });
+  });
+}
+
 export function sendChatMessage(text: string): Promise<string | null> {
   return new Promise((resolve) => {
     socket.emit('chat:send', text, (error) => {

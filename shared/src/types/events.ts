@@ -73,6 +73,9 @@ export interface ClientToServerEvents {
   'executive:investigate-acknowledge': (callback: (error: string | null) => void) => void;
   'executive:peek-acknowledge': (callback: (error: string | null) => void) => void;
 
+  // Discussion gate
+  'discussion:ready': (callback: (error: string | null) => void) => void;
+
   // Chat
   'chat:send': (text: string, callback: (error: string | null) => void) => void;
 }
