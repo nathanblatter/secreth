@@ -2,8 +2,6 @@ services:
   app:
     build: .
     restart: unless-stopped
-    ports:
-      - "6767:6767"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -14,6 +12,12 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       KPI_API_KEY: ${KPI_API_KEY}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:6767/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
     depends_on:
       seed:
         condition: service_completed_successfully
