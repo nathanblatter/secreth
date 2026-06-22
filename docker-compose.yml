@@ -12,6 +12,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       KPI_API_KEY: ${KPI_API_KEY}
+      FLIGHTDECK_URL: ${FLIGHTDECK_URL:-http://flightdeck:8080}
+      FLIGHTDECK_INGEST_KEY: ${FLIGHTDECK_INGEST_KEY}
+    networks:
+      - default
+      - flightdeck
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:6767/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
@@ -39,3 +44,8 @@ services:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN}
     depends_on:
       - app
+
+networks:
+  flightdeck:
+    external: true
+    name: docker-services_default
