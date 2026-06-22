@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Deploy
         run: |
-          cd /Users/nathanblatter/Desktop/secreth
+          cd /Users/nathanblatter/dev/secreth
           git pull origin main
 
           # Build new image
