@@ -3,6 +3,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import multer from 'multer';
 import path from 'path';
 import type { ClientToServerEvents, ServerToClientEvents, SocketData } from '../../shared/src';
 import { registerSocketHandlers } from './socket/handlers';
@@ -83,11 +84,67 @@ app.post('/api/bug-report', async (req, res) => {
       }),
     });
     if (!r.ok) throw new Error('ingest ' + r.status);
-    res.json({ ok: true });
+    const created = await r.json().catch(() => null) as { id?: string } | null;
+    res.json({ ok: true, id: created?.id ?? null });
   } catch (err) {
     console.error('bug-report forward failed:', err);
     res.status(502).json({ error: 'Could not reach the bug tracker.' });
   }
+});
+
+// Bug report screenshots → flightdeck attachments
+const MAX_SCREENSHOTS = 4;
+const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024; // 8MB
+const SCREENSHOT_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const screenshotUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: MAX_SCREENSHOTS, fileSize: MAX_SCREENSHOT_BYTES },
+});
+
+app.post('/api/bug-report/:id/screenshots', (req, res) => {
+  const key = process.env.FLIGHTDECK_INGEST_KEY;
+  if (!key) return res.status(503).json({ error: 'Bug reporting is not configured.' });
+  const itemId = req.params.id;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(itemId)) {
+    return res.status(400).json({ error: 'Invalid report id.' });
+  }
+  screenshotUpload.array('files', MAX_SCREENSHOTS)(req, res, async (err: unknown) => {
+    if (err) {
+      const code = (err as { code?: string }).code;
+      if (code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Each screenshot must be 8MB or less.' });
+      if (code === 'LIMIT_FILE_COUNT' || code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).json({ error: `At most ${MAX_SCREENSHOTS} screenshots per report.` });
+      }
+      return res.status(400).json({ error: 'Could not read the upload.' });
+    }
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) return res.status(400).json({ error: 'No screenshots provided.' });
+    if (files.some((f) => !SCREENSHOT_MIME.has(f.mimetype))) {
+      return res.status(400).json({ error: 'Screenshots must be PNG, JPEG, WebP or GIF images.' });
+    }
+    const base = (process.env.FLIGHTDECK_URL || 'http://flightdeck:8080').replace(/\/$/, '');
+    try {
+      const form = new FormData();
+      for (const f of files) {
+        form.append('files', new Blob([new Uint8Array(f.buffer)], { type: f.mimetype }), f.originalname || 'screenshot.png');
+      }
+      const r = await fetch(`${base}/api/ingest/attachments/${itemId}`, {
+        method: 'POST',
+        headers: { 'X-API-Key': key },
+        body: form,
+      });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) {
+        console.error('screenshot forward rejected:', r.status, body);
+        return res.status(r.status === 404 || r.status === 410 ? r.status : 502)
+          .json({ error: 'The tracker rejected the screenshots.' });
+      }
+      res.status(201).json({ ok: true, attachments: body });
+    } catch (fwdErr) {
+      console.error('screenshot forward failed:', fwdErr);
+      res.status(502).json({ error: 'Could not reach the bug tracker.' });
+    }
+  });
 });
 
 // In production, serve index.html for all non-API/non-socket routes (SPA fallback)
