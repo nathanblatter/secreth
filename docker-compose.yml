@@ -37,7 +37,7 @@ services:
     command: ["node", "server/dist/server/src/seed.js"]
 
   tunnel:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.3
     restart: unless-stopped
     command: tunnel run
     environment:
